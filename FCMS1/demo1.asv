@@ -1,0 +1,22 @@
+
+% the main function
+
+clear;
+
+% read the image data;
+%image_data=im2double(imread('tu1.bmp'));
+image_data=ones(100,100);
+%image_data=image_data./255;
+[image_row,image_col] = size(image_data);
+image_data(1:image_row,1:image_col/2)=0;
+image_data(1:image_row,image_col/2+1:image_col)=255*0.8;
+%image_data(1:image_row, image_col/2+1:image_col)=120;
+image_data=image_data./255;
+ %figure;imshow( image_data,'Border','tight');
+ %imwrite(image_data,'2g.jpg');
+ W=imnoise(image_data,'gaussian',0.15);%%
+ imwrite(W,'2g.jpg');
+%figure; imshow(Y,'Border','tight');
+V=imnoise(image_data,'salt & pepper',0.15);
+imwrite(V,'2sp.jpg');
+%figure; imshow(Z,'2sp','tight');

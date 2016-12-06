@@ -1,0 +1,9 @@
+This is a demo of our image segmentation algorithms. 
+The demo.m is the main function. 
+There are six algorithms in this demo: FCM_S1, FCM_S2, EnFCM, FGFCM_S1, FGFCM_S2 and FGFCM.
+
+
+Provided by:
+Lab for Pattern Recognition & Neural Computing;
+Dept. of Computer Science & Engineering;
+Nanjing University of Aeronautics & Astronautics;

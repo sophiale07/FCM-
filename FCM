@@ -1,0 +1,252 @@
+// FCM.cpp: 主项目文件。
+//traditional FCM
+
+
+#include "stdafx.h"
+#include "cv.h"
+#include "highgui.h"
+#include "cxcore.h"
+#include "math.h"
+#include "time.h"
+#define iter_num 100 //the maximum number of iterations
+#define thres 0.00001 //pre_defined threshold
+#define cluster_num 3
+
+double m=2;
+
+using namespace System;
+double distance[iter_num]; //object function
+double center_g[cluster_num];
+double*** membership;
+double** membersum;
+double*** dist;
+
+//double center_l[height][width][cluster_num]; //local cluster centers
+
+
+
+int GetMaxPos(float * arr, int n)
+{
+	int pos = 0;
+	float maxvalue = arr[0];
+	for(int index = 0; index < n; ++index)
+	{
+		if(arr[index] > maxvalue)
+		{
+			maxvalue=arr[index];
+			pos = index;
+		}
+	}
+	return pos;
+}
+
+int main(array<System::String ^> ^args)
+{
+	IplImage *pImg,*newImg;
+	uchar *data,*newdata;
+	int channels,step,depth,width,height;
+
+	int i,j,k,kk,it;
+	float membership_m;
+	float * arr = new float[cluster_num];
+	int pos = 0;
+
+	pImg=cvLoadImage("ssar2_noise_mix.bmp",0);
+	if(!pImg){
+		printf("cannot load the file.\n");
+		return -1;
+	} 	
+
+	data=(uchar *)pImg->imageData;	
+	
+	width=pImg->width;
+	height=pImg->height;
+	depth=pImg->depth;
+	step=pImg->widthStep;
+	channels=pImg->nChannels;
+    membership=new double**[height];  
+    for(int k=0; k<height; k++)  
+	{  
+       membership[k] = new double*[width]; 
+       for(int i=0; i <width; i++)  
+	   {
+		   membership[k][i] = new double[cluster_num]; 
+	   }
+     }  
+    membersum=new double*[height];  
+    for(int k=0; k<height; k++)
+	{
+       membersum[k] = new double[width]; 
+	}
+
+    dist=new double**[height];  
+    for(int k=0; k<height; k++)  
+    {  
+       dist[k] = new double*[width]; 
+       for(int i=0; i <width; i++)  
+	   {
+       dist[k][i] = new double[cluster_num]; 
+	   }
+    } 
+	//initialize membership matrix
+	srand((int)time(0));
+	for(i=0;i<height;i++)
+	{
+		for(j=0;j<width;j++)
+		{
+			membersum[i][j]=0.0;
+			for(k=0;k<cluster_num;k++)
+			{
+				membership[i][j][k]=rand()+1;
+				membersum[i][j]+=membership[i][j][k];
+			}
+
+			for(k=0;k<cluster_num;k++)
+				membership[i][j][k]/=membersum[i][j];
+		}
+	}
+
+	//computing initial cluster centers	
+	for(k=0;k<cluster_num;k++)
+	{
+		membership_m=0;
+		center_g[k]=0;
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+				center_g[k]+=pow(membership[i][j][k],m)*data[i*step+j];
+				membership_m+=pow(membership[i][j][k],m);
+			}
+		}
+		center_g[k]/=membership_m;
+	}
+
+	//computing the distance between pixels to cluster centers
+	for(i=0;i<height;i++)
+		for(j=0;j<width;j++)	
+			for(k=0;k<cluster_num;k++)
+				dist[i][j][k]=abs(data[i*step+j]-center_g[k]);
+
+
+
+
+	//computing distance[0]
+	distance[0]=0.0;
+	for(i=0;i<height;i++)
+		for(j=0;j<width;j++)
+			for(k=0;k<cluster_num;k++)
+				distance[0]+=pow(membership[i][j][k],m)*pow(dist[i][j][k],2.0);
+				
+	printf("the object function of the %d step is %.6f\n",0,distance[0]);
+
+	for(it=1;it<iter_num;it++)
+	{
+		distance[it]=0.0;
+		//update membership
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+				for(k=0;k<cluster_num;k++)
+				{
+					membership[i][j][k]=0.0;
+					for(kk=0;kk<cluster_num;kk++)				
+					{   
+						membership[i][j][k]+=pow(dist[i][j][k]/dist[i][j][kk],2/(m-1));
+						
+						
+					}
+					membership[i][j][k]=1.0/membership[i][j][k];
+				}
+			}
+		}
+
+		//update cluster centers
+		for(k=0;k<cluster_num;k++)
+		{
+			membership_m=0;
+			center_g[k]=0;
+			for(i=0;i<height;i++)
+			{
+				for(j=0;j<width;j++)
+				{   
+					center_g[k]+=pow(membership[i][j][k],m)*data[i*step+j];
+					membership_m+=pow(membership[i][j][k],m);
+				}
+			}
+			center_g[k]/=membership_m;
+		}
+
+		//update local distance dist[][][]
+		for(i=0;i<height;i++)
+			for(j=0;j<width;j++)	
+				for(k=0;k<cluster_num;k++)
+					dist[i][j][k]=abs(data[i*step+j]-center_g[k]);
+					
+
+		for(i=0;i<height;i++)
+			for(j=0;j<width;j++)
+				for(k=0;k<cluster_num;k++)
+                   distance[it]+=pow(membership[i][j][k],m)*pow(dist[i][j][k],2);
+				  
+
+		printf("the object function of the %d step is %.6f\n",it,distance[it]);
+
+		if (abs(distance[it-1]-distance[it])<thres)
+			break;				
+	}
+
+	newImg=cvCreateImage(cvSize(width,height),depth,channels);//producing empty graph
+	newdata=(uchar *)newImg->imageData;
+
+	 //用聚类中心值标记区域
+	/*for(int i=0;i<height;i++)
+	{
+		for(int j=0;j<width;j++)
+		{
+		   for(int k = 0; k <cluster_num; ++k)
+		    {
+			  arr[k] = membership[i][j][k];
+		    }
+		   pos = GetMaxPos(arr,cluster_num);
+		   newdata[i*step+j]=(unsigned char)center_g[pos];
+		}
+	}*/
+
+	//用均匀灰度差标记区域
+	
+	for(i=0;i<height;i++)
+	{
+		for(j=0;j<width;j++)
+		{
+			int count =0;
+	       for(int k = 0; k <cluster_num; ++k)
+		    {
+			  arr[k] = membership[i][j][k];
+		    }
+		    pos = GetMaxPos(arr,cluster_num);
+			for(int k = 0; k <cluster_num; ++k)
+			{
+			    if(center_g[pos]<center_g[k])count++;
+			}
+	            newdata[i*step+j]=255*(cluster_num-1-count)/(cluster_num-1);
+		  }
+     }
+
+
+
+	cvSaveImage("ssar2_noise_mix_fcm.bmp",newImg);
+	cvNamedWindow("fcm",1);
+	cvShowImage("fcm",pImg);
+
+	cvNamedWindow("fcmed",1);
+	cvShowImage("fcmed",newImg);
+
+	cvWaitKey(0);
+	cvDestroyAllWindows();
+	cvReleaseImage(&pImg);
+	cvReleaseImage(&newImg);
+	return 0;   
+}
+

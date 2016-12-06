@@ -1,0 +1,591 @@
+include "StdAfx.h"
+#include <stdio.h>
+#include <math.h>
+#include "cv.h"
+#include "highgui.h"
+#include "time.h"
+#include "cxcore.h"
+#include "windows.h"
+
+
+
+void IplToMatrix(unsigned char *SrcData, float *DstData, int step, int iHeight, int iWidth)//
+{
+    for(int h=0; h<iHeight; h++)
+	{
+	    for(int w=0; w<iWidth; w++)
+	    {
+	      DstData[h*iWidth+w] = (float)SrcData[h*step+w];
+	      int test = 0;
+	    }
+	}
+}
+
+
+void CalcCenters( float *image, int height, int width, float *U, int cNum, float m, float *c )
+{
+    int L = height*width;
+	float sSum;
+	for(int k=0; k<cNum; k++ )
+	{    
+		
+		c[k] = 0.0;
+		sSum = 0.0;
+		for(int i=0; i<height; i++ )
+		{
+			for(int j=0; j<width; j++ )
+			{
+				sSum += pow( U[i*width + j + k*L], m );
+				c[k] += pow(U[i*width + j + k*L],m) * image[i*width+j];
+			}
+		}
+		//int test1 = 0;
+		c[k] /= sSum;
+		//int test = 0;
+		printf("c[%d]=%.4f ",k,c[k]);
+		
+	}
+	printf("\n");
+	
+	
+}
+
+
+
+float dist2(float x,float y)
+{
+  //return pow((x-y),2);
+ return fabs(x-y);
+}
+
+int GetMaxPos(float * arr, int n)
+{
+	int pos = 0;
+	float maxvalue = arr[0];
+	for(int index = 0; index < n; ++index)
+	{
+		if(arr[index] > maxvalue)
+		{
+			maxvalue=arr[index];
+			pos = index;
+		}
+	}
+	return pos;
+}
+
+void U_to_Image(float *img,float *U, unsigned char *img_dst, int height, int width, int step, float * c, int cNum)
+{
+    int Length = height*width;
+    float * arr = new float[cNum];
+	int pos = 0;
+
+	for(int h = 0; h< height; h++)
+	{
+	   for(int w = 0; w < width; w++)
+	   {
+		   //用聚类中心值标记区域
+		  /*for(int i = 0; i < cNum; ++i)
+		  {
+			  arr[i] = U[h*width+w+Length*i];
+
+		   }
+		   pos = GetMaxPos(arr, cNum);
+		   
+		   img_dst[h*step+w] = (unsigned char)c[pos];*/
+		   
+		   
+		   //用均匀灰度差标记区域
+			for(int i = 0; i < cNum; ++i)
+		   {
+			  arr[i] = U[h*width+w+Length*i];
+
+		   }
+		   pos = GetMaxPos(arr, cNum);
+
+		   //输出某一个聚类的图像，用原图像的像素值表示
+		   /*if(pos==0)
+		   {
+			   img_dst[h*step+w]=img[h*width+w];
+		   }
+		   else img_dst[h*step+w]=255;*/
+
+			int count =0;
+			for(int k=0;k<cNum;k++)
+			{
+				if(c[pos]<c[k])count++;
+			}
+			
+			//更新分割图像的像素值
+			 img_dst[h*step+w]=255*(cNum-1-count)/(cNum-1);
+			// //输出（0-wht,1-gry,2-csf)
+			//if(count==2)
+   //        img_dst[h*step+w]=255;
+			//else img_dst[h*step+w]=0;
+
+	   }
+	}
+	delete []arr;
+}
+
+
+float GetCu(int i,int j,int winSize,int height, int width,float *img)
+{
+	float c_avg=0;
+	int c_count=0;
+	float c_cu=0;
+	int sStep = (winSize-1)/2;
+	//对3*3邻域的处理.
+	for(int ii=-sStep; ii<=sStep; ii++ )
+	{
+		for(int jj=-sStep; jj<=sStep; jj++ )
+		{
+			int x = j + jj;
+			int y = i + ii;
+			if( x>=0 && x<width && y>=0 && y<height )
+			{
+				c_avg=c_avg+img[y*width + x];
+				c_count++;
+			}
+
+		}
+	}
+	c_avg=c_avg/c_count;
+
+	for(int ii=-sStep; ii<=sStep; ii++ )
+	{
+		for(int jj=-sStep; jj<=sStep; jj++ )
+		{
+			int x = j + jj;
+			int y = i + ii;
+			if( x>=0 && x<width && y>=0 && y<height )
+			{
+				c_cu=c_cu+pow((img[y*width + x]-c_avg),2);
+
+			}
+
+		}
+	}
+	c_cu=c_cu/(pow(c_avg,2)+0.01);
+	return c_cu;
+}
+void FLICM_alg(IplImage *SrcImg,float *img, int height, int width, float *Uinit, float *U, float *cinit, float m, int cNum, int winSize, int maxIter, float thrE, float *c,int imgstep)
+{  
+
+	int sStep = (winSize-1)/2;
+    float *Uold = new float[height*width*cNum];
+	float *d = new float[cNum];
+	
+	FILE *pF,*F,*p;
+	//F=fopen((char *)"pixel_test.txt","w+");
+    //pF=fopen((char *)"U_test.txt","w+");
+	for(int i=0; i<height; i++ )
+	{
+		for(int j=0; j<width; j++ )
+		{
+			for(int k=0; k<cNum; k++ )
+			{
+				U[k*height*width + i*width + j] = Uinit[k*height*width + i*width + j];
+				Uold[k*height*width + i*width + j] = U[k*height*width + i*width + j];
+			}
+		}
+	}
+	for(int k=0; k<cNum; k++)
+		c[k] = cinit[k];
+
+	int sweeps = 0;
+	float dMax = 10.f;
+	float vec  = 0.f;
+	float sSum = 0.f;
+	float dist = 0.f;
+	float dd = 0.f;
+	
+	SYSTEMTIME sys;
+
+	GetLocalTime( &sys); 	
+
+	printf("\nthe time0 is %d,%d.%d\n",sys.wMinute,sys.wSecond,sys.wMilliseconds);
+
+		
+	while( dMax>thrE && sweeps<=maxIter )
+	{  
+		p=fopen((char *)"nor_cu_test.txt","w+");
+		pF=fopen((char *)"U_test.txt","w+");
+		// Calculation of the new array U.
+		for(int i=0; i<height; i++ )
+		{
+			for(int j=0; j<width; j++ )
+			{
+				
+				
+				int count=0;
+				for(int ii=-sStep; ii<=sStep; ii++ )
+				{
+					for(int jj=-sStep; jj<=sStep; jj++ )
+					{
+						int x = j + jj;
+						int y = i + ii;
+
+						if( x>=0 && x<width && y>=0 && y<height  )
+						{
+							count++;
+
+						}
+						
+					}
+				}
+				
+				float *cu=new float[count];
+	            float *nor_cu=new float[count];
+				int mm=0;
+				for(int ii=-sStep; ii<=sStep; ii++ )
+				{
+					for(int jj=-sStep; jj<=sStep; jj++ )
+					{
+						int x = j + jj;
+						int y = i + ii;
+
+						if( x>=0 && x<width && y>=0 && y<height  )
+						{
+							cu[mm]=GetCu(y,x,winSize, height, width,img);
+							mm++;
+						}
+
+					}
+				}
+				
+
+				float cu_max=0;
+				for (int n=0;n<count;n++)
+				{
+					if(cu[n]>cu_max)
+					{
+						cu_max=cu[n];
+					}
+
+				}
+				float cu_min=cu_max;
+				for (int n=0;n<count;n++)
+				{
+					if(cu[n]<cu_min)
+					{
+						cu_min=cu[n];
+					}
+
+				}
+				for(int n=0;n<count;n++)
+				{
+					nor_cu[n]=(cu[n]-cu_min)/(cu_max-cu_min+1);
+				}
+				
+				// for each center.
+				for(int k=0; k<cNum; k++ )
+				{
+
+					vec = img[i*width+j];
+					sSum = fabs( vec-c[k] );
+	                int n=0;
+					for(int ii=-sStep; ii<=sStep; ii++ )
+					{
+						for(int jj=-sStep; jj<=sStep; jj++ )
+						{
+							int x = j + jj;
+							int y = i + ii;
+							dist = sqrt( (float)(x-j)*(x-j) + (float)(y-i)*(y-i) );
+							if( x>=0 && x<width && y>=0 && y<height )
+							{
+								float vec_n = img[y*width + x];
+								sSum +=1.f/(1.f + dist)*pow(1.f-Uold[y*width+x+k*height*width], m) * pow(fabs(vec_n-c[k]),2);//FLICM Gki
+								//sSum +=/*exp(1/(1+sqrt(pow(nor_cu[n],2))))**/1.f/(1.f + dist*(1-sqrt(pow(nor_cu[n],2))))*pow(1.f-Uold[y*width+x+k*height*width], m) * pow(fabs(vec_n-c[k]),2);//+nor_Cu
+								//fprintf(p,"nor_cu[%d,%d,%d]=%.4f  ",i,j,n,nor_cu[n]);
+								n++;
+								
+							} 
+							
+						}
+				   }
+					d[k] = sSum; /**/
+					
+					
+				}
+
+				for(int k=0; k<cNum; k++ )
+				{
+					dd = d[k];
+					
+					sSum = 0.f;
+					for(int ii=0; ii<cNum; ii++ )
+					{ 
+						
+						
+						sSum += pow((dd+pow(fabs(vec-c[k]),2))/(d[ii]+pow(fabs(vec-c[ii]),2)),1.f/(m-1.f));
+					
+					}
+					U[k*height*width + i*width + j] = 1.f / sSum;//uki
+					fprintf(pF,"u[%d,%d,%d]=%.4f ",i,j,k,U[k*height*width + i*width + j]);
+				}
+			    fprintf(pF,"\n");
+			}
+			
+		}
+		fclose(pF);
+		fclose(p);
+		// New center calculation.
+			printf("%d.",sweeps+1);
+		CalcCenters( img, height, width, U, cNum, m, c );//vk
+
+		dMax = -1.f;
+		// Copy new array U to old one.
+		for(int i=0; i<height; i++ )
+		{
+			for(int j=0; j<width; j++ )
+			{
+				for(int k=0; k<cNum; k++ )
+				{
+					if( dMax<fabs(Uold[k*height*width + i*width + j] - U[k*height*width + i*width + j]) )
+						dMax = fabs(Uold[k*height*width + i*width + j] - U[k*height*width + i*width + j]);
+					Uold[k*height*width + i*width + j] = U[k*height*width + i*width + j];
+					//Uout[k*height*width + j*height + i] = U[k*height*width + j*height + i];
+				}
+			}
+		}
+
+ 		sweeps++;
+	}	
+	
+	GetLocalTime(&sys); 	
+
+	printf("\nthe time is %d,%d.%d\n",sys.wMinute,sys.wSecond,sys.wMilliseconds);
+
+	
+	
+ }
+
+
+void Init_NewCenter(int Kcluss,float *Center)
+{
+	/*int *randcenter;
+	randcenter=new int[Kcluss];
+	memset(randcenter,0,sizeof(int)*Kcluss);
+	srand((unsigned)time(NULL));
+	randcenter[0]=0;
+    randcenter[1]=0;
+	while(randcenter[0] == randcenter[1])
+	{
+	   randcenter[0]=rand()%255;
+       randcenter[1]=rand()%255;
+	}
+*/
+	for(int i=0;i<Kcluss;i++)
+	{	
+		Center[i]=rand()%255;                                                       
+	}
+
+}
+
+
+void Initcenterfour(float *data,float *Center,int Ndata,int cNum)
+{
+	
+	int i;
+	float min_m = data[0],max_m = data[0];
+	for(i=0;i<Ndata;i++)
+	{
+		if(min_m > data[i])
+			min_m = data[i];
+		if(max_m < data[i])
+			max_m = data[i];
+	}
+	//printf("max_m=%.4f,min_m=%.4f\n",max_m,min_m);
+	for(int k=0;k<cNum;++k)
+	{
+		int n=2*k+1;
+        int cNUm2=2*cNum;
+
+      Center[k] = min_m+(n*(max_m - min_m)/cNUm2);
+
+	}
+	 // int test = 0;
+}
+
+
+
+//void U_to_Image(float *U, unsigned char *img_dst, int height, int width, int step, float * c, int cNum)
+//{
+//    int Length = height*width;
+//    float * arr = new float[cNum];
+//	int pos = 0;
+//	for(int h = 0; h< height; h++)
+//	{
+//	   for(int w = 0; w < width; w++)
+//	   {
+//		   //用聚类中心值标记区域
+//		  /*for(int i = 0; i < cNum; ++i)
+//		  {
+//			  arr[i] = U[h*width+w+Length*i];
+//
+//		   }
+//		   pos = GetMaxPos(arr, cNum);
+//		   
+//		   img_dst[h*step+w] = (unsigned char)c[pos];*/
+//		   
+//		   
+//		   //用均匀灰度差标记区域
+//			for(int i = 0; i < cNum; ++i)
+//		   {
+//			  arr[i] = U[h*width+w+Length*i];
+//
+//		   }
+//		   pos = GetMaxPos(arr, cNum);
+//
+//			int count =0;
+//			for(int k=0;k<cNum;k++)
+//			{
+//				if(c[pos]<c[k])count++;
+//			}
+//			//更新分割图像的像素值
+//			 img_dst[h*step+w]=255*(cNum-1-count)/(cNum-1);
+//	   }
+//	}
+//
+//	delete []arr;
+//}
+
+
+
+//void Evaluation(unsigned char *StdData, unsigned char *ResData, int step, int Height, int Wide)
+//{
+//	float ErrorC    = 0.f;
+//	float MissC     = 0.f;
+//	float AllErrorC = 0.f;
+//    int offset = 1;
+//	for(int i=offset ; i<Height-offset ; i++)
+//	{
+//		for(int j=offset ; j<Wide-offset  ; j++)
+//		{
+//			if(StdData[i*step+j] ==0 && ResData[i*step+j] ==255)
+//				ErrorC++;//n12
+//
+//			if(StdData[i*step+j] ==255 && ResData[i*step+j] ==0)
+//				MissC++;//n21
+//		}
+//	}
+//	AllErrorC = ErrorC + MissC;
+//	printf("Error:%f\n", ErrorC);
+//	printf("Miss:%f\n",  MissC);
+//	printf("AllError:%f\n", AllErrorC);
+//
+//}
+
+void Evaluation(float *U,int height, int width,int cNum,float *c)
+{
+	float vpc=0;
+	float vpe=0;
+	int n=height*width;
+	 FILE *F;
+	 F=fopen((char *)"vpc_vpe_test.txt","w");
+	for(int i=0;i<height;i++)
+	{
+      for(int j=0;j<width;j++)
+	  {
+        for(int k=0;k<cNum;k++)
+		{
+            vpc+=pow(U[i*width+j+n*k],2);
+            if(U[i*width+j+n*k]>0)
+                vpe+=(float)((log(U[i*width+j+n*k])*U[i*width+j+n*k])/log(2.0));
+		}
+	  }
+	}
+    vpc=vpc/n;
+    vpe=-vpe/n;
+
+    fprintf(F,"vpc=%.4f, vpe=%.4f\n",vpc,vpe);
+		
+	fclose(F);
+
+}
+
+
+int main()
+{
+   IplImage *SrcImg = cvLoadImage("ssar1_noise_salt & pepper.bmp", CV_LOAD_IMAGE_GRAYSCALE);
+   IplImage *DstImg = cvCreateImage(cvGetSize(SrcImg), IPL_DEPTH_8U, 1);
+   int ImgWide   = SrcImg->width;
+   int ImgHeight = SrcImg->height;
+   int ImgStep   = SrcImg->widthStep/sizeof(uchar);
+   unsigned char *ImgDataS = (uchar*)SrcImg->imageData;
+   unsigned char *ImgDataD = (uchar*)DstImg->imageData;
+
+   int kLength = ImgHeight*ImgWide;
+   int Kcluss =5;
+   int cNum = Kcluss;
+   int Ndata = kLength;
+   float *Initial_old = new float[kLength*Kcluss];
+   memset(Initial_old, 0, sizeof(float)*Kcluss*kLength);
+   float *c_init = new float[Kcluss];
+   memset(c_init, 0, sizeof(float)*Kcluss);
+
+   float *img = new float[ImgHeight*ImgWide];
+   memset(img, 0, sizeof(float)*ImgHeight*ImgWide);
+   IplToMatrix(ImgDataS, img, ImgStep, ImgHeight, ImgWide);
+  //Init_NewCenter(cNum, c_init);
+   Initcenterfour(img, c_init, kLength,cNum);
+   int sweeps = 0;
+  /* FILE *pF;
+   pF=fopen((char *)"U_test.txt","w");*/
+   
+   for(int i=0; i<Kcluss; i++)
+   {
+	   for(int j=0; j<Ndata; j++)
+	   {
+		   float distance = dist2(c_init[i],img[j]);
+		   if(distance > 0)
+		   {
+			   float utemp = 0.f;
+			   for(int k=0; k<Kcluss; k++)
+			   {
+				   utemp += 1/(dist2(c_init[k], img[j]));
+			   }
+			   Initial_old[i*Ndata+j] = pow(distance*utemp, 1/(1-2));
+		   }
+		   else
+		   {
+			   Initial_old[i*Ndata+j] = 1;
+		   }
+	   }
+   }
+
+   
+
+   int winSize = 3;
+   int maxIter =100;
+   float thrE = 0.01f;
+   float *U = new float[ImgHeight*ImgWide*cNum];
+   float *c = new float[cNum];
+
+   
+
+   FLICM_alg(SrcImg,img, ImgHeight, ImgWide, Initial_old, U, c_init, 2, cNum, winSize, maxIter, thrE, c,ImgStep);
+   Evaluation(U,ImgHeight,ImgWide,cNum,c);
+   U_to_Image(img,U, ImgDataD, ImgHeight, ImgWide, ImgStep, c, cNum);
+
+
+  // IplImage *StdImg = cvLoadImage("gtu2.jp", CV_LOAD_IMAGE_GRAYSCALE);
+ //  unsigned char *StdData = (uchar*)StdImg->imageData;
+ // Evaluation(StdData, ImgDataD, ImgStep, ImgHeight, ImgWide);
+
+   cvNamedWindow("源图像", 0);
+   cvResizeWindow("源图像", ImgWide, ImgHeight);
+   cvShowImage("源图像", SrcImg);
+   cvNamedWindow("分类后图像", 0);
+   cvResizeWindow("分类后图像", ImgWide, ImgHeight);
+   cvShowImage("分类后图像", DstImg);
+   cvSaveImage("ssar1_noise_salt & pepper_FLICM.bmp", DstImg);
+   delete []U;
+   delete []c;
+   cvWaitKey(0);
+   cvDestroyAllWindows();
+   cvReleaseImage(&SrcImg);
+
+   cvReleaseImage(&DstImg);
+   return 0;
+}

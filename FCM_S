@@ -1,0 +1,557 @@
+// FCM_S.cpp: 主项目文件。
+//iamzxf@126.com
+//QQ 250129131
+
+#include "stdafx.h"
+#include "cv.h"
+#include "highgui.h"
+#include "cxcore.h"
+#include "time.h"
+#include "WTypes.h"
+
+
+using namespace System;
+
+#define height 207
+#define width 212
+#define cluster_n 3
+#define LEVEL 256
+#define iters 100
+#define mm 2
+#define thres 0.00001
+#define alpha 2
+#define p 0
+#define q 1
+
+double membership[height][width][cluster_n];
+double center[cluster_n];
+double distance[iters];
+double temp_sum,w;
+
+
+int GetMaxPos(float * arr, int n)
+{
+	int pos = 0;
+	float maxvalue = arr[0];
+	for(int index = 0; index < n; ++index)
+	{
+		if(arr[index] > maxvalue)
+		{
+			maxvalue=arr[index];
+			pos = index;
+		}
+	}
+	return pos;
+}
+
+
+
+int main(array<System::String ^> ^args)
+{
+	IplImage *pImg,*newImg;
+
+	pImg=cvLoadImage("ssar2_noise_mix.bmp",CV_LOAD_IMAGE_GRAYSCALE);
+
+	if(!pImg){
+		printf("cannot load the file.\n");
+		return -1;
+	}
+
+	uchar *data,*newdata;
+	int channels, step,depth;	
+
+
+	depth=pImg->depth;
+	step=pImg->widthStep;
+	channels=pImg->nChannels;
+	data=(uchar *) pImg->imageData;
+
+	int i,j,k,m,n,kk;
+	int member_sum;
+	double temp_sum;
+	int it;
+	SYSTEMTIME sys; 
+
+	GetLocalTime( &sys); 	
+	printf("\nthe time is %d,%d.%d\n",sys.wMinute,sys.wSecond,sys.wMilliseconds);
+
+	//initialize membership matrix	
+	srand((int)time(0));
+
+	FILE *pF,*fF;
+	pF=fopen((char *)"data1.txt","w");
+	//fF=fopen((char *)"data2.txt","w");
+	if (NULL==pF)
+	{
+		printf("open write file error!!");
+		return 1;
+	}
+	
+	
+
+	for(i=0;i<height;i++)
+	{
+		for(j=0;j<width;j++)
+		{
+			member_sum=0;
+			for(k=0;k<cluster_n;k++)
+			{
+				membership[i][j][k]=rand()+1;
+				member_sum+=membership[i][j][k];
+			}
+			
+			for(k=0;k<cluster_n;k++)
+			{
+				membership[i][j][k]/=member_sum;
+			}
+		}
+	}
+/*	for(i=178;i<=180;i++)
+	{
+		
+		for(j=140;j<=142;j++)
+		{
+	
+			fprintf(fF, " %03u ",data[i*step+j] );
+			
+		}
+		fprintf(fF, "\n");
+		
+	 }
+	fclose(fF);
+	*/
+	for(i=178;i<=180;i++)
+	{
+		for(j=140;j<=142;j++)
+		{
+	
+			fprintf(pF, "%lf\n", membership[i][j][0]);
+			
+		}
+		
+	 }
+	fprintf(pF, "\n");
+
+	//compute the initialized cluster centers
+
+	double sum_down,sum_up,sum_gray;
+	int num_neigh;
+	int up,down,left,right;
+
+	for(k=0;k<cluster_n;k++)
+	{
+		sum_down=0;
+		sum_up=0;
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+				sum_down+=(1+alpha)*pow(membership[i][j][k],mm);
+
+				num_neigh=0;
+				sum_gray=0;
+
+				up=i-1;
+				down=i+1;
+				left=j-1;
+				right=j+1;
+
+				if(up<0) up=0;
+				if(down>height) down=height;
+				if(left<0) left=0;
+				if(right>width) right=width;
+
+				for(m=up;m<=down;m++)
+				{
+					for(n=left;n<=right;n++)
+					{
+						sum_gray+=data[m*step+n];
+						num_neigh++;
+					}
+				}
+
+				sum_up+=pow(membership[i][j][k],mm)*(data[i*step+j]+(sum_gray-data[i*step+j])*alpha/(num_neigh-1));	
+
+			}
+		}
+
+		center[k]=sum_up/sum_down;	
+	}
+	
+	for(i=0;i<cluster_n;i++)
+	{
+		printf("center[%d]=%f \n",i+1,center[i]);
+	}
+	//compute the distance[0]
+	
+	for(it=0;it<iters;it++)
+	{
+		distance[it]=0;
+	}
+
+
+	for(i=0;i<height;i++)
+	{
+		for(j=0;j<width;j++)
+		{
+			for(k=0;k<cluster_n;k++)
+			{
+				distance[0]+=pow(membership[i][j][k],mm)*pow((data[i*step+j]-center[k]),2);
+
+				//add the additional of the FCM_S
+
+				num_neigh=0;
+				temp_sum=0;
+				up=i-1;
+				down=i+1;
+				left=j-1;
+				right=j+1;
+
+				if(up<0) up=0;
+				if(down>height) down=height;
+				if(left<0) left=0;
+				if(right>width) right=width;
+
+				for(m=up;m<=down;m++)
+				{
+					for(n=left;n<=right;n++)
+					{
+						temp_sum+=pow(data[m*step+n]-center[k],2);
+						num_neigh++;
+					}
+				}
+				
+				temp_sum-=pow(data[i*step+j]-center[k],2);
+
+				distance[0]+=pow(membership[i][j][k],mm)*temp_sum*alpha/(num_neigh-1);
+
+			}
+		}
+	}
+
+	printf("the object function in the %3d-th is %.5f \n",1,distance[0]);
+
+
+	for(it=1;it<iters;it++)
+	{
+		//compute the membership matrix
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+
+				sum_down=0;
+				for(k=0;k<cluster_n;k++)
+				{
+					num_neigh=0;
+					temp_sum=0;
+					up=i-1;
+					down=i+1;
+					left=j-1;
+					right=j+1;
+
+					if(up<0) up=0;
+					if(down>height) down=height;
+					if(left<0) left=0;
+					if(right>width) right=width;
+
+					for(m=up;m<=down;m++)
+					{
+						for(n=left;n<=right;n++)
+						{
+							temp_sum+=pow(data[m*step+n]-center[k],2);
+							num_neigh++;
+						}
+					}
+					temp_sum-=pow(data[i*step+j]-center[k],2);
+
+					sum_down+=pow(temp_sum*alpha/(num_neigh-1)+pow(data[i*step+j]-center[k],2),-1/(mm-1));
+
+				}
+
+				for(k=0;k<cluster_n;k++)
+				{					
+					num_neigh=0;
+					temp_sum=0;
+					up=i-1;
+					down=i+1;
+					left=j-1;
+					right=j+1;
+
+					if(up<0) up=0;
+					if(down>height) down=height;
+					if(left<0) left=0;
+					if(right>width) right=width;
+
+					for(m=up;m<=down;m++)
+					{
+						for(n=left;n<=right;n++)
+						{
+							temp_sum+=pow(data[m*step+n]-center[k],2);
+							num_neigh++;
+						}
+					}
+					temp_sum-=pow(data[i*step+j]-center[k],2);
+
+					sum_up=pow(temp_sum*alpha/(num_neigh-1)+pow(data[i*step+j]-center[k],2),-1/(mm-1));
+
+					membership[i][j][k]=sum_up/sum_down;
+				}				
+			}
+		}
+	for(i=178;i<=180;i++)
+	{
+		for(j=140;j<=142;j++)
+		{
+	
+			fprintf(pF, "%lf\n", membership[i][j][k]);
+			
+		}
+		
+	 }
+	fprintf(pF, "\n");
+
+	/*
+			double p1,p2;
+		//计算新的membership
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+				sum_down=0;
+				sum_up=0;
+				for(k=0;k<cluster_n;k++)
+				{
+					//num_neigh=0;
+					temp_sum=0;
+					up=i-1;
+					down=i+1;
+					left=j-1;
+					right=j+1;
+
+					if(up<0) up=0;
+					if(down>height) down=height;
+					if(left<0) left=0;
+					if(right>width) right=width;
+
+					for(m=up;m<=down;m++)
+					{
+						for(n=left;n<=right;n++)
+						{
+							
+							//p1=(data[m*step+n]-data[i*step+j])*(data[m*step+n]-data[i*step+j]);
+							//temp_sum+=membership[m][n][k]*p1;
+							temp_sum+=membership[m][n][k];
+							num_neigh++;
+						}
+					}
+					sum_up=pow(membership[i][j][k],p)*pow(temp_sum,q);
+					//sum_up+=temp_sum;
+					for(k=0;k<cluster_n;k++)
+					{
+						w=0;
+						up=i-1;
+						down=i+1;
+						left=j-1;
+						right=j+1;
+
+						if(up<0) up=0;
+						if(down>height) down=height;
+						if(left<0) left=0;
+						if(right>width) right=width;
+						for(m=up;m<=down;m++)
+						{
+							for(n=left;n<=right;n++)
+							{
+								
+								//p2=(data[m*step+n]-data[i*step+j])*(data[m*step+n]-data[i*step+j]);
+								//w+=membership[m][n][k]*p2;
+								w+=membership[m][n][k];
+							
+							}
+						}
+						sum_down+=pow(membership[i][j][k],p)*pow(w,q);
+
+					}
+					//printf("sum_down",sum_down);
+					membership[i][j][k]=sum_up/sum_down;
+				}
+			}
+		}
+	    
+	for(i=178;i<=180;i++)
+	{
+		for(j=140;j<=142;j++)
+		{
+	
+			fprintf(pF, "%lf\n", membership[i][j][0]);
+			
+		}
+		
+	 }
+		
+		*/
+		//compute the centers
+
+		for(k=0;k<cluster_n;k++)
+		{
+			sum_down=0;
+			sum_up=0;
+			for(i=0;i<height;i++)
+			{
+				for(j=0;j<width;j++)
+				{
+					sum_down+=(1+alpha)*pow(membership[i][j][k],mm);
+
+					num_neigh=0;
+					sum_gray=0;
+
+					up=i-1;
+					down=i+1;
+					left=j-1;
+					right=j+1;
+
+					if(up<0) up=0;
+					if(down>height) down=height;
+					if(left<0) left=0;
+					if(right>width) right=width;
+
+					for(m=up;m<=down;m++)
+					{
+						for(n=left;n<=right;n++)
+						{
+							sum_gray+=data[m*step+n];
+							num_neigh++;
+						}
+					}
+
+					sum_up+=pow(membership[i][j][k],mm)*(data[i*step+j]+(sum_gray-data[i*step+j])*alpha/(num_neigh-1));	
+
+				}
+			}
+			center[k]=sum_up/sum_down;	
+			fprintf(pF, "%lf\n",center[k]);
+		}
+
+		
+		fprintf(pF, "--------------\n");
+		//compute the distance
+
+		for(i=0;i<height;i++)
+		{
+			for(j=0;j<width;j++)
+			{
+				for(k=0;k<cluster_n;k++)
+				{
+					//distance[it]+=pow(membership[i][j][k],mm)*pow((data[i*step+j]-center[k]),2);
+
+					//add the additional of the FCM_S
+
+					num_neigh=0;
+					temp_sum=0;
+					up=i-1;
+					down=i+1;
+					left=j-1;
+					right=j+1;
+
+					if(up<0) up=0;
+					if(down>height) down=height;
+					if(left<0) left=0;
+					if(right>width) right=width;
+
+					for(m=up;m<=down;m++)
+					{
+						for(n=left;n<=right;n++)
+						{
+							temp_sum+=pow(data[m*step+n]-center[k],2);
+							num_neigh++;
+						}
+					}
+					
+					temp_sum-=pow(data[i*step+j]-center[k],2);
+
+					distance[it]+=pow(membership[i][j][k],mm)*temp_sum*alpha/(num_neigh-1);
+
+				}
+			}
+		}
+		
+		printf("the object function in the %3d-th is %.5f \n",it+1,distance[it]);
+
+		if(abs(distance[it]-distance[it-1])<thres || distance[it]>distance[it-1])
+			break;
+	}
+
+	GetLocalTime( &sys); 	
+	printf("\nthe time is %d,%d.%d\n",sys.wMinute,sys.wSecond,sys.wMilliseconds);
+
+
+
+	for(i=0;i<cluster_n;i++)
+	{
+		printf("center[%d]=%f \n",i+1,center[i]);
+	}
+
+
+	newImg=cvCreateImage(cvSize(width,height),depth,channels);//生成空图
+	newdata=(uchar *)newImg->imageData;
+	 fclose(pF);
+	  float * arr = new float[cluster_n];
+	  int pos = 0;
+	for(i=0;i<height;i++)
+	{
+		for(j=0;j<width;j++)
+		{
+			for(int k = 0; k < cluster_n; ++k)
+		   {
+			  arr[k] = membership[i][j][k];
+
+		   }
+		   pos = GetMaxPos(arr, cluster_n);
+			//cvSet2D(newImg,i,j,s);
+		   int count =0;
+			for(int k=0;k<cluster_n;k++)
+			{
+				if(center[pos]<center[k])count++;
+			}
+			
+			//更新分割图像的像素值
+			 newdata[i*step+j]=255*(cluster_n-1-count)/(cluster_n-1);
+		}
+	}
+	delete []arr;
+	
+	float vpc=0;
+	float vpe=0;
+	height*width;
+	 FILE *F;
+	 F=fopen((char *)"vpc_vpe_test.txt","w+");
+	for(int i=0;i<height;i++)
+	{
+      for(int j=0;j<width;j++)
+	  {
+        for(int k=0;k<cluster_n;k++)
+		{
+            vpc+=pow( membership[i][j][k],2);
+            if(membership[i][j][k]>0)
+                vpe+=(float)((log( membership[i][j][k])* membership[i][j][k])/log(2.0));
+		}
+	  }
+	}
+    vpc=vpc/(height*width);
+    vpe=-vpe/(height*width);
+    fprintf(F,"vpc=%.4f, vpe=%.4f\n",vpc,vpe);
+	fclose(F);
+
+	cvSaveImage("ssar2_noise_mix_FCM_S.bmp",newImg);
+	cvNamedWindow("Image",1);
+	cvNamedWindow("newImg",1);
+	cvShowImage("Image",pImg);
+	cvShowImage("newImg",newImg);
+	cvWaitKey(0);
+	cvDestroyWindow("Image");
+	cvDestroyWindow("newImg");
+	cvReleaseImage(&pImg);
+	cvReleaseImage(&newImg);
+	
+}
